@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `cookie_bug` crate.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, cookie_bug">
+
+    <title>cookie_bug - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <nav class="sidebar">
+        
+        <p class='location'></p><script>window.sidebarCurrent = {name: 'cookie_bug', ty: 'mod', relpath: '../'};</script>
+    </nav>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content mod">
+<h1 class='fqn'><span class='in-band'>Crate <a class='mod' href=''>cookie_bug</a></span><span class='out-of-band'><span id='render-detail'>
+            <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                [<span class='inner'>&#x2212;</span>]
+            </a>
+        </span><a id='src-0' class='srclink' href='../src/cookie_bug/lib.rs.html#1-299' title='goto source code'>[src]</a></span></h1>
+<div class='docblock'>
+<h2 id="tl;dr" class='section-header'><a
+                           href="#tl;dr">tl;dr</a></h2>
+<p>cookie-rs percent-decodes a cookie&#39;s key and value,
+it later only re-encodes the value.
+No such encoding/decoding is defined for cookies.
+Applications relying on the parser might break,
+e.g. Servo doesn&#39;t use cookie-rs&#39; formatting
+and might send cookies with invalid characters back.</p>
+
+<hr>
+
+<h1 id="a-bug" class='section-header'><a
+                           href="#a-bug">A bug</a></h1>
+<p>It turns out cookie-rs handles Cookies in a rather unexpected way,
+which in turn breaks other systems, such as Servo, that rely on cookie-rs
+to do the parsing only, but no encoding/decoding of a cookie&#39;s contents.</p>
+
+<h1 id="cookie-theory" class='section-header'><a
+                           href="#cookie-theory">Cookie Theory</a></h1>
+<p>The latest &quot;definitive specification for cookies as used
+in the real world was published&quot; (according to Wikipedia)
+is <a href="https://tools.ietf.org/html/rfc6265">RFC6265</a>,
+&quot;HTTP State Management Mechanism&quot;.</p>
+
+<p>A cookie as sent in an HTTP header is defined by</p>
+
+<pre><code class="language-text">cookie-pair       = cookie-name &quot;=&quot; cookie-value
+cookie-name       = token
+cookie-value      = *cookie-octet / ( DQUOTE *cookie-octet DQUOTE  )
+</code></pre>
+
+<p><code>token</code> is defined in another RFC as</p>
+
+<pre><code class="language-text">token          = 1*&lt;any CHAR except CTLs or separators&gt;
+</code></pre>
+
+<p>with <code>CHAR</code> being every US-ASCII character and CTL being control characters
+(including carriage return <code>\r</code> and linefeed <code>\n</code>)</p>
+
+<p>A cookie-octet is represented as:</p>
+
+<pre><code class="language-text">cookie-octet      = %x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E
+</code></pre>
+
+<p>That is:
+US-ASCII characters excluding control characters, whitespace, comma,
+semicolon and backslash.
+That leaves a whole lot of characters to be used,
+especially the percent sign <code>%</code> (aka <code>%x25</code>).</p>
+
+<p>The same <code>cookie-pair</code> description is used
+for the header sent back to a server.</p>
+
+<p>The RFC also contains a description on how to properly parse HTTP headers
+to extract a cookie&#39;s key-value pair.
+It relaxes a bit from the above format,
+so even servers not conforming to it will still be usable.</p>
+
+<p>At no point does the RFC talk about any encoding or interpretation
+of the values.</p>
+
+<p>It has this hint though:</p>
+
+<blockquote>
+<p>NOTE: Despite its name, the cookie-string is actually a sequence of
+octets, not a sequence of characters.
+To convert the cookie-string
+(or components thereof) into a sequence of characters (e.g., for
+presentation to the user), the user agent might wish to try using the
+UTF-8 character encoding</p>
+</blockquote>
+
+<p>Note: any such decoding should be for presentation to the user.
+The string has to be used unmodified when used in a HTTP header.</p>
+
+<h1 id="cookie-rs" class='section-header'><a
+                           href="#cookie-rs">Cookie-rs</a></h1>
+<p><a href="https://github.com/alexcrichton/cookie-rs">Cookie-rs</a> is a library for
+HTTP cookie parsing and cookie jar management for rust.</p>
+
+<p>It&#39;s also used by <a href="https://github.com/hyperium/hyper">Hyper</a>,
+which in turn is used in <a href="https://github.com/servo/servo">Servo</a>.</p>
+
+<p>Usage is easy:</p>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>let</span> <span class='ident'>cookie_str</span> <span class='op'>=</span> <span class='string'>&quot;key=value&quot;</span>;
+<span class='kw'>let</span> <span class='ident'>cookie</span> <span class='op'>=</span> <span class='ident'>Cookie</span>::<span class='ident'>parse</span>(<span class='ident'>cookie_str</span>).<span class='ident'>unwrap</span>();</pre>
+
+<p>This gives you a cookie object with access to all relevant fields,
+especially the key and value.</p>
+
+<p>But hidden in the code and no where documented,
+it percent-decodes everything.</p>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>let</span> <span class='ident'>cookie_str</span> <span class='op'>=</span> <span class='string'>&quot;key=value%23foobar&quot;</span>;
+<span class='kw'>let</span> <span class='ident'>cookie</span> <span class='op'>=</span> <span class='ident'>Cookie</span>::<span class='ident'>parse</span>(<span class='ident'>cookie_str</span>).<span class='ident'>unwrap</span>();
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='string'>&quot;value#foobar&quot;</span>, <span class='ident'>cookie</span>.<span class='ident'>value</span>); <span class='comment'>// Unexpected.</span></pre>
+
+<p>It does so for the key as well.
+This will also re-encode the value using percent-encoding.</p>
+
+<p>It also comes with a handy method to format a cookie again:</p>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>let</span> <span class='ident'>cookie</span> <span class='op'>=</span> <span class='ident'>Cookie</span>::<span class='ident'>new</span>(<span class='string'>&quot;key&quot;</span>.<span class='ident'>into</span>(), <span class='string'>&quot;value#foobar&quot;</span>.<span class='ident'>into</span>());
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='string'>&quot;key=value%23foobar&quot;</span>, <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>cookie</span>));</pre>
+
+<p>Though it does not do this percent-reencoding for the value.</p>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>let</span> <span class='ident'>cookie</span> <span class='op'>=</span> <span class='ident'>Cookie</span>::<span class='ident'>new</span>(<span class='string'>&quot;key#foobar&quot;</span>.<span class='ident'>into</span>(), <span class='string'>&quot;value&quot;</span>.<span class='ident'>into</span>());
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='string'>&quot;key#foobar=value&quot;</span>, <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>cookie</span>));</pre>
+
+<p>The decoding was introduced a long time ago in
+<a href="https://github.com/alexcrichton/cookie-rs/commit/724003decad72cdbe3f998b0b8d181682e9582c5">724003de</a>.</p>
+
+<h1 id="servo" class='section-header'><a
+                           href="#servo">Servo</a></h1>
+<p>Servo relies on Hyper and cookie-rs to do the right thing
+with HTTP requests and parsing of the data.</p>
+
+<p>Because it&#39;s a browser it also stores the cookies and sends them back
+to the server as necessary.</p>
+
+<p>It also <a href="https://github.com/servo/servo/blob/2be0cb7827c6553b7dfa4d641bf3a1c72372ad3b/components/net/cookie_storage.rs#L87-L117">properly follows the exact steps</a>
+to generate the cookie header as written in the RFC.
+And in the end it just concatenates the key and value.</p>
+<pre class='rust rust-example-rendered'>
+(<span class='kw'>match</span> <span class='ident'>acc</span>.<span class='ident'>len</span>() {
+    <span class='number'>0</span> <span class='op'>=&gt;</span> <span class='ident'>acc</span>,
+    _ <span class='op'>=&gt;</span> <span class='ident'>acc</span> <span class='op'>+</span> <span class='string'>&quot;;&quot;</span>
+}) <span class='op'>+</span> <span class='kw-2'>&amp;</span><span class='ident'>c</span>.<span class='ident'>cookie</span>.<span class='ident'>name</span> <span class='op'>+</span> <span class='string'>&quot;=&quot;</span> <span class='op'>+</span> <span class='kw-2'>&amp;</span><span class='ident'>c</span>.<span class='ident'>cookie</span>.<span class='ident'>value</span></pre>
+
+<p><code>c.cookie</code> is already a <code>Cookie</code> object, as parsed by <code>cookie-rs</code>.
+This means all the above mentioned percent-decoding was already applied.
+But because it direclty uses the strings in the object,
+no re-encoding is applied anymore.</p>
+
+<p>Now consider a server sending a string containing percent symbols (<code>%</code>),
+maybe even something that actually looks like a
+properly percent-encoded value (<code>%0A = \n</code>).
+Interpretation of this string is totally up to the server.
+It expects to get the exact same string back from the client.</p>
+
+<p>Instead it gets a percent-decoded, but not re-encoded value back.</p>
+
+<p>Therefore Servo will fail to adhere to the RFC and breaks application
+expecting their cookies back.</p>
+
+<p>The following cookies cause problems when Servo receives them
+and later sends them back.</p>
+<pre class='rust rust-example-rendered'>
+<span class='ident'>Cookie</span>::<span class='ident'>parse</span>(<span class='string'>&quot;key=value%eefoobar&quot;</span>) <span class='comment'>// After percent-decoding it&#39;s not valid UTF-8</span>
+                                    <span class='comment'>// and therefore not a valid String</span>
+                                    <span class='comment'>// Servo will just not save it.</span>
+                                    <span class='comment'>// → Cookie lost.</span>
+
+<span class='ident'>Cookie</span>::<span class='ident'>parse</span>(<span class='string'>&quot;key=value%0Afoobar&quot;</span>) <span class='comment'>// After percent-decoding it contains</span>
+                                    <span class='comment'>// a newline.</span>
+                                    <span class='comment'>// Servo will insert it as is,</span>
+                                    <span class='comment'>// breaking the whole `Cookie` header</span>
+                                    <span class='comment'>// → Cookie is invalid on server-side</span></pre>
+
+<h1 id="solutions" class='section-header'><a
+                           href="#solutions">Solutions</a></h1>
+<p>The best thing would be to separate the different steps in cookie-rs.
+Provide one layer for parsing only, solely dealing with byte arrays.
+This layer would be used by Servo and would just work.</p>
+
+<p>Another layer on top could help with an actual decoding
+or turning cookies into strings.
+But at this point it&#39;s up to the application to decide.</p>
+
+<p>Of course the above would be a breaking change of cookie-rs
+(even though this behaviour is not documented at all).
+Right now there are only 6 reverse-dependencies on crates.io plus Servo.
+I didn&#39;t check usage in any of them to see if above solution would break
+more stuff.</p>
+
+<p>To keep cookie-rs as is (but maybe atleast document its behavior),
+a new low-level library could be used
+(which in turn makes cookie-rs just a user of this library).
+No one depending on cookie-rs directly would be affected,
+but Servo could be fixed.</p>
+
+<p>Note: Even re-encoding the cookie when inserted as a header by Servo
+would not help, because of cookies not decoding to proper UTF-8.</p>
+</div><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table>
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._01_simple.html'
+                               title='cookie_bug::_01_simple'>_01_simple</a></td>
+                        <td class='docblock short'>
+                             <p>It can parse cookies easily</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._02_value_percent.html'
+                               title='cookie_bug::_02_value_percent'>_02_value_percent</a></td>
+                        <td class='docblock short'>
+                             <p>But it decodes the value</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._03_value_single_percent.html'
+                               title='cookie_bug::_03_value_single_percent'>_03_value_single_percent</a></td>
+                        <td class='docblock short'>
+                             <p>And it fails if the value doesn&#39;t hold a valid percent-encoded string</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._04_key_percent.html'
+                               title='cookie_bug::_04_key_percent'>_04_key_percent</a></td>
+                        <td class='docblock short'>
+                             <p>The same is true for the key: it&#39;s decoded.</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._05_format.html'
+                               title='cookie_bug::_05_format'>_05_format</a></td>
+                        <td class='docblock short'>
+                             <p>cookie-rs comes with a handy method to display a cookie.
+It does so by formatting as you expect.
+(It even includes the additional data used in a <code>Set-Cookie</code> header)</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._06_format_perc.html'
+                               title='cookie_bug::_06_format_perc'>_06_format_perc</a></td>
+                        <td class='docblock short'>
+                             <p>If it gets a percent-encoded string like <code>value%2Ffoobar</code>,
+everything is fine, because none of the characters gets
+percent-encoded again.</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._07_format_hash.html'
+                               title='cookie_bug::_07_format_hash'>_07_format_hash</a></td>
+                        <td class='docblock short'>
+                             <p>But if it has a value like <code>value#foobar</code>,
+the <code>#</code> gets encoded.</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._08_format_hash_key.html'
+                               title='cookie_bug::_08_format_hash_key'>_08_format_hash_key</a></td>
+                        <td class='docblock short'>
+                             <p>Funnily enough: percent-encoding on display is only applied to the value,
+the key is passed through unmodified.</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._09_invalid_utf8.html'
+                               title='cookie_bug::_09_invalid_utf8'>_09_invalid_utf8</a></td>
+                        <td class='docblock short'>
+                             <p>Because it expects to get a proper string,
+it fails to build up a cookie</p>
+
+                        </td>
+                    </tr>
+                
+                    <tr class=' module-item'>
+                        <td><a class='fn' href='fn._10_newline.html'
+                               title='cookie_bug::_10_newline'>_10_newline</a></td>
+                        <td class='docblock short'>
+                             <p>And now it also inserts a newline</p>
+
+                        </td>
+                    </tr>
+                </table></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <aside id="help" class="hidden">
+        <div>
+            <h1 class="hidden">Help</h1>
+
+            <div class="shortcuts">
+                <h2>Keyboard Shortcuts</h2>
+
+                <dl>
+                    <dt>?</dt>
+                    <dd>Show this help dialog</dd>
+                    <dt>S</dt>
+                    <dd>Focus the search field</dd>
+                    <dt>&larrb;</dt>
+                    <dd>Move up in search results</dd>
+                    <dt>&rarrb;</dt>
+                    <dd>Move down in search results</dd>
+                    <dt>&#9166;</dt>
+                    <dd>Go to active search result</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h2>Search Tricks</h2>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>type</code>, <code>macro</code>,
+                    and <code>const</code>.
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code>)
+                </p>
+            </div>
+        </div>
+    </aside>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "cookie_bug";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../jquery.js"></script>
+    <script src="../main.js"></script>
+    
+    <script async src="../search-index.js"></script>
+</body>
+</html>
